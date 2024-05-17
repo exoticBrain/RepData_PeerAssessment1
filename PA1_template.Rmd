@@ -1,3 +1,6 @@
+Personal Activity Monitoring Report
+===================================
+
 ---
 title: "Reproducible Research: Peer Assessment 1"
 output: 
@@ -5,21 +8,141 @@ output:
     keep_md: true
 ---
 
-
-## Loading and preprocessing the data
-
-
-
-## What is mean total number of steps taken per day?
+Loading some libraries
+```{r results='hide'}
+library(dplyr); library(lubridate); library(ggplot2) 
+```
 
 
+## 1- Loading and preprocessing the data
+```{r echo=TRUE}
+activity <- read.csv('activity.csv')
 
-## What is the average daily activity pattern?
+# format the date into a date format
+activity$date <- as.Date(activity$date, "%Y-%m-%d")
+activity <- activity %>% mutate(day = day(date))
+
+# Percentage of NAs
+missing <- round(mean(is.na(activity$steps)) * 100)
+```
+When can see that `r missing`% is missing from the data.
+
+## 2- What is mean total number of steps taken per day?
+
+### a- the total number of steps taken per day
+
+```{r echo=TRUE}
+total_steps_per_day <- aggregate(steps ~ day, data = activity, FUN = sum)
+
+# Plot the histogram
+ggplot(total_steps_per_day, aes(x = steps)) +
+  geom_histogram(binwidth = 4000, fill = "blue", color = "black", alpha = 0.7) +
+  labs(title = "Total number of steps taken per day", x = "Steps", y = "Frequency") +
+  theme_minimal()
+```
+
+### b- the mean and median of the total number of steps taken per day
+
+```{r echo=TRUE}
+mean_steps_per_day <- aggregate(steps ~ day, data = activity, FUN = mean)
+median_steps_per_day <- aggregate(steps ~ day, data = activity, FUN = median)
+
+par(mfrow = c(1, 2), mar = c(4, 4, 2, 1))
+
+hist(mean_steps_per_day$steps, xlab = "Mean Steps", ylab = "Frequency", col = "deepskyblue", border = "black", main = "Mean Steps Per Day", breaks = 5, ylim = c(0, 15))
+hist(median_steps_per_day$steps, xlab = "Median Steps", ylab = "Frequency", col = "darkturquoise", border = "black", main = "Median Steps Per Day", breaks = 5, ylim = c(0, 15))
+first_median_mean <- mean(median_steps_per_day$steps)
+```
+
+Wee see that the mean of the median is around **`r first_median_mean`** because there is huge number of days that the person didn't actually take any step. We can see this here in the *top five number of steps* table
+
+```{r echo=TRUE}
+no_step <- data.frame(sort(table(activity$steps), decreasing = TRUE)[1:5])
+names(no_step) <- c("Number Of Steps", "Count")
+no_step
+```
+
+## 3- The average daily activity pattern
+
+```{r echo=TRUE}
+interval_means <- activity %>%
+  group_by(interval) %>%
+  summarize(mean_steps = mean(steps, na.rm = TRUE))
+
+interval_with_max_steps <- interval_means[which.max(interval_means$mean_steps),1]
+with(interval_means, {
+  plot(interval, mean_steps, type = "l", col = "deepskyblue", 
+       main = "The 5-minute Interval and the Average Number of Steps Taken",
+       xlab = "Interval", ylab = "Average Number of Steps")
+  # Add the vertical line
+  abline(v = interval_with_max_steps, col = "red")
+  legend("topright", legend = "Interval 835", col = "red", lty = 1, cex = 0.8)
+})
+```
+
+So the 5-minute interval, on average across all the days in the activity dataset, contains the maximum number of steps is the **interval `r interval_with_max_steps`**
+
+## 4- Imputing missing values
+1. the total number of rows with (NAs)
+```{r echo=TRUE}
+nrow_na <- activity %>% filter(is.na(steps)) %>% nrow()
+```
+- The total number of rows with missing values is **`r nrow_na`** which represent **`r missing`%** of the whole dataset
+
+2. I will replace each missing value with the mean of the corresponding 5-minute interval from **interval_means**
+```{r echo=TRUE}
+# Merge the interval means back into the original dataframe
+activity_filled <- activity %>%
+  left_join(interval_means, by = "interval") %>%
+  mutate(steps = ifelse(is.na(steps), mean_steps, steps)) %>%
+  select(-mean_steps)
+head(activity_filled)
+```
+  
+```{r}
+total_steps_per_day <- aggregate(steps ~ day, data = activity_filled, FUN = sum)
+
+# Plot the histogram
+ggplot(total_steps_per_day, aes(x = steps)) +
+  geom_histogram(binwidth = 4000, fill = "blue", color = "black", alpha = 0.7) +
+  labs(title = "Total number of steps taken per day", x = "Steps", y = "Frequency") +
+  theme_minimal()
+
+# the mean and median of the total number of steps taken per day
+
+mean_steps_per_day <- aggregate(steps ~ day, data = activity_filled, FUN = mean)
+median_steps_per_day <- aggregate(steps ~ day, data = activity_filled, FUN = median)
+
+par(mfrow = c(1, 2), mar = c(4, 4, 2, 1))
+
+hist(mean_steps_per_day$steps, xlab = "Mean Steps", ylab = "Frequency", col = "deepskyblue", border = "black", main = "Mean Steps Per Day", breaks = 5, ylim = c(0, 15))
+hist(median_steps_per_day$steps, xlab = "Median Steps", ylab = "Frequency", col = "darkturquoise", border = "black", main = "Median Steps Per Day", breaks = 5, ylim = c(0, 15))
+second_median_mean <- mean(median_steps_per_day$steps)
+```
+These values do differ from the estimates from the first part of the assignment. When can see in the mean histogram that values between **30-40 steps** increased a bit and also the mean of the median values is now around **`r round(second_median_mean)`**.
 
 
+## 5- Are there differences in activity patterns between weekdays and weekends?
 
-## Imputing missing values
+### a- The new factor variable in the dataset with two levels – “weekday” and “weekend”
+```{r}
+activity_weekdays <- activity %>% mutate(day_name = weekdays(date, abbreviate = T))
+unique(activity_weekdays$day_name)
+
+activity_weekdays <- activity_weekdays %>% mutate(work_chill = ifelse(!day_name %in% c("Sat", "Sun"), "weekday", "weekend"))
+```
 
 
+### b- The 5-minute Interval and the Average Number of Steps Taken averaged across all weekday days or weekend days
+```{r echo=TRUE}
+interval_means <- activity_weekdays %>%
+  group_by(interval, work_chill) %>%
+  summarize(mean_steps = mean(steps, na.rm = TRUE))
 
-## Are there differences in activity patterns between weekdays and weekends?
+ggplot(interval_means, aes(x = interval, y = mean_steps, color = work_chill)) +
+  geom_line() +
+  facet_wrap(~work_chill) +
+  labs(title = "The 5-minute Interval and the Average Number of Steps Taken",
+       x = "Interval", y = "Average Number of Steps") +
+  theme_minimal()
+```
